@@ -13,7 +13,7 @@ Uso l'AI per pensare CON, non pensare AL POSTO DI — questa distinzione è fond
 # Cosa trovi qui
 
 - Un'app desktop Python per gestire personaggi SillyTavern senza conoscere la sintassi STScript
-- Documentazione completa del flusso reale e verificato: dall'installazione di SillyTavern e KoboldCpp, alla generazione di immagini con Stable Diffusion, fino alla creazione di un modello LLM personalizzato con LLaMA-Factory
+- Documentazione completa del flusso reale e verificato: dall'installazione di SillyTavern e KoboldCpp, alla generazione di immagini con Stable Diffusion, fino alla creazione di un modello LLM personalizzato con LLaMA-Factory (in locale)
 - Un caso studio completo — Anita — dal training LoRA testuale al deployment in SillyTavern
 
 ---
