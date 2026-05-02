@@ -144,7 +144,7 @@ ICON_STEP4_CLOSE = (
 # ============================================================
 _SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE  = os.path.join(_SCRIPT_DIR, "config.json")
-APP_TITLE    = "ST Character Manager"
+APP_TITLE    = "ANIMA - ST Character Manager"
 
 UMORI_DEFAULT = {
     "M": ["Felice", "Malinconico", "Arrabbiato", "Curioso", "Ansioso"],
@@ -392,7 +392,6 @@ def _read_character_data(st_folder, nome):
                             "system_prompt":      db.get("system_prompt")      or card.get("system_prompt",      ""),
                             "mes_example":        db.get("mes_example")        or card.get("mes_example",        ""),
                             "alternate_greetings": db.get("alternate_greetings") or card.get("alternate_greetings", []),
-                            "extensions_world":   db.get("extensions", {}).get("world", ""),
                         }
                         raw_date = card.get("create_date", "")
                         if raw_date:
@@ -577,7 +576,7 @@ def generate_character_json(character_data):
             "extensions": {
                 "talkativeness": "0.5",
                 "fav": False,
-                "world": character_data.get("_extensions_world", ""),
+                "world": "",
                 "depth_prompt": {"prompt": "", "depth": 4, "role": "system"}
             }
         },
@@ -1469,7 +1468,7 @@ class Screen1b(ctk.CTkToplevel):
 
     def _salta(self):
         self.destroy()
-        self.callback_avanti(self._image_path)  # propaga l'immagine esistente, o "" se non ce n'è una
+        self.callback_avanti("")
 
     def _avanti(self):
         self.destroy()
@@ -1490,8 +1489,8 @@ class Screen2(ctk.CTkToplevel):
         super().__init__(parent)
         self.withdraw()
         self.title(APP_TITLE)
-        self.resizable(True, True)
-        _center_toplevel(self, 700, 660)
+        self.resizable(True, False)
+        _center_toplevel(self, 700, 510)
         self.genere           = genere
         self.nome             = nome
         self.callback_avanti  = callback_avanti
@@ -1576,8 +1575,8 @@ class Screen2b(ctk.CTkToplevel):
         super().__init__(parent)
         self.withdraw()
         self.title(APP_TITLE)
-        self.resizable(True, True)
-        _center_toplevel(self, 700, 780)
+        self.resizable(True, False)
+        _center_toplevel(self, 700, 750)
         self.genere           = genere
         self.nome             = nome
         self.descrizione      = descrizione
@@ -1687,8 +1686,8 @@ class Screen2c(ctk.CTkToplevel):
         super().__init__(parent)
         self.withdraw()
         self.title(APP_TITLE)
-        self.resizable(True, True)
-        _center_toplevel(self, 700, 650)
+        self.resizable(True, False)
+        _center_toplevel(self, 700, 620)
         self.genere           = genere
         self.nome             = nome
         self.callback_avanti  = callback_avanti
@@ -1772,8 +1771,8 @@ class Screen2d(ctk.CTkToplevel):
         super().__init__(parent)
         self.withdraw()
         self.title(APP_TITLE)
-        self.resizable(True, True)
-        _center_toplevel(self, 700, 700)
+        self.resizable(True, False)
+        _center_toplevel(self, 700, 650)
         self.genere           = genere
         self.nome             = nome
         self.callback_avanti  = callback_avanti
@@ -1861,8 +1860,8 @@ class Screen2e(ctk.CTkToplevel):
         super().__init__(parent)
         self.withdraw()
         self.title(APP_TITLE)
-        self.resizable(True, True)
-        _center_toplevel(self, 700, 730)
+        self.resizable(True, False)
+        _center_toplevel(self, 700, 680)
         self.genere           = genere
         self.nome             = nome
         self.callback_avanti  = callback_avanti
@@ -1950,7 +1949,7 @@ class Screen2f(ctk.CTkToplevel):
         self.withdraw()
         self.title(APP_TITLE)
         self.resizable(True, True)
-        _center_toplevel(self, 760, 560)
+        _center_toplevel(self, 760, 660)
         self.genere           = genere
         self.nome             = nome
         self.callback_avanti  = callback_avanti
@@ -2090,9 +2089,10 @@ class Screen2f(ctk.CTkToplevel):
         self.lbl_info.configure(text="")
 
     def _rimuovi(self):
-        if self._idx_sel is None:
+        sel = self.listbox.curselection()
+        if not sel:
             return
-        idx = self._idx_sel
+        idx = sel[0]
         self.listbox.delete(idx)
         self.greetings.pop(idx)
         self.txt_preview.delete("1.0", "end")
@@ -2127,7 +2127,7 @@ class Screen3(ctk.CTkToplevel):
         self.withdraw()
         self.title(APP_TITLE)
         self.resizable(True, True)
-        _center_toplevel(self, 720, 660)
+        _center_toplevel(self, 720, 750)
         self.genere           = genere
         self.nome             = nome
         self.dati_precedenti  = dati_precedenti
@@ -2139,8 +2139,6 @@ class Screen3(ctk.CTkToplevel):
             self.variabili = list(variabili_iniziali.keys())
         else:
             self.variabili = list(VARIABILI)
-        self._idx_sel_umore = None
-        self._idx_sel_var   = None
         self._build()
         self.deiconify()
         self.grab_set()
@@ -2165,7 +2163,6 @@ class Screen3(ctk.CTkToplevel):
                                         selectbackground=ACCENT, selectforeground=BG,
                                         relief="flat", bd=0, height=5)
         self.listbox_umori.pack(side="left", fill="x", expand=True, padx=4, pady=4)
-        self.listbox_umori.bind("<<ListboxSelect>>", lambda e: self._set_idx_umore())
         for u in self.umori:
             self.listbox_umori.insert("end", u)
 
@@ -2199,7 +2196,6 @@ class Screen3(ctk.CTkToplevel):
                                       selectbackground=ACCENT, selectforeground=BG,
                                       relief="flat", bd=0, height=5)
         self.listbox_var.pack(side="left", fill="x", expand=True, padx=4, pady=4)
-        self.listbox_var.bind("<<ListboxSelect>>", lambda e: self._set_idx_var())
         for v in self.variabili:
             self.listbox_var.insert("end", v)
 
@@ -2234,17 +2230,11 @@ class Screen3(ctk.CTkToplevel):
                              "Nome del nuovo stato d'umore:",
                              self.umori, self.listbox_umori)
 
-    def _set_idx_umore(self):
+    def _rimuovi_umore(self):
         sel = self.listbox_umori.curselection()
         if sel:
-            self._idx_sel_umore = sel[0]
-
-    def _rimuovi_umore(self):
-        if self._idx_sel_umore is None:
-            return
-        self.listbox_umori.delete(self._idx_sel_umore)
-        self.umori.pop(self._idx_sel_umore)
-        self._idx_sel_umore = None
+            self.listbox_umori.delete(sel[0])
+            self.umori.pop(sel[0])
 
     # ── Variabili ─────────────────────────────────────────────
 
@@ -2254,17 +2244,11 @@ class Screen3(ctk.CTkToplevel):
                              self.variabili, self.listbox_var,
                              validatore=self._valida_var)
 
-    def _set_idx_var(self):
+    def _rimuovi_var(self):
         sel = self.listbox_var.curselection()
         if sel:
-            self._idx_sel_var = sel[0]
-
-    def _rimuovi_var(self):
-        if self._idx_sel_var is None:
-            return
-        self.listbox_var.delete(self._idx_sel_var)
-        self.variabili.pop(self._idx_sel_var)
-        self._idx_sel_var = None
+            self.listbox_var.delete(sel[0])
+            self.variabili.pop(sel[0])
 
     def _valida_var(self, testo):
         import re as _re
@@ -2347,6 +2331,7 @@ class ScreenComplete(ctk.CTkToplevel):
         self.deiconify()
         self.grab_set()
         self.lift()
+        self.protocol("WM_DELETE_WINDOW", self._chiudi)
 
     def _build(self, nome, risultato):
         ctk.CTkLabel(self, text="\u2713  Installazione completata!",
@@ -3184,77 +3169,6 @@ class Screen4(ctk.CTkToplevel):
         self.after(3000, lambda: self.lbl_copiato.configure(text=""))
 
 # ============================================================
-# SCREEN INFO GENERALI — Help → Info generali
-# ============================================================
-
-class ScreenInfoGenerali(ctk.CTkToplevel):
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.withdraw()
-        self.title(APP_TITLE)
-        self.resizable(False, False)
-        _center_toplevel(self, 660, 460)
-        self._build()
-        self.deiconify()
-        self.grab_set()
-        self.focus_force()
-
-    def _build(self):
-        self.configure(fg_color=BG)
-
-        # Header
-        ctk.CTkLabel(self, text="Anima", font=ctk.CTkFont(size=28, weight="bold"),
-                     text_color=ACCENT).pack(pady=(28, 2))
-        ctk.CTkLabel(self, text="A SillyTavern character manager that makes AI feel human",
-                     font=ctk.CTkFont(size=13), text_color=GRAY).pack(pady=(0, 4))
-
-        # Separatore
-        sep = ctk.CTkFrame(self, height=2, corner_radius=0, fg_color=BTN_BG)
-        sep.pack(fill="x", padx=40, pady=(8, 16))
-        sep.pack_propagate(False)
-
-        # Info tabella
-        info = [
-            ("Versione",    "v0.1"),
-            ("Autore",      "Threadripper"),
-            ("Licenza codice",  "GPL v3"),
-            ("Licenza docs",    "CC BY-SA 4.0"),
-            ("Python",      "3.10+  •  Richiede: customtkinter"),
-        ]
-        frame = ctk.CTkFrame(self, fg_color="transparent")
-        frame.pack(padx=40, fill="x")
-        for label, valore in info:
-            row = ctk.CTkFrame(frame, fg_color="transparent")
-            row.pack(fill="x", pady=3)
-            ctk.CTkLabel(row, text=label, font=ctk.CTkFont(size=13, weight="bold"),
-                         text_color=FG, width=120, anchor="w").pack(side="left")
-            ctk.CTkLabel(row, text=valore, font=ctk.CTkFont(size=13),
-                         text_color=GRAY, anchor="w", wraplength=500).pack(side="left", fill="x", expand=True)
-
-        # Riga Repository cliccabile
-        row_repo = ctk.CTkFrame(frame, fg_color="transparent")
-        row_repo.pack(fill="x", pady=3)
-        ctk.CTkLabel(row_repo, text="Repository", font=ctk.CTkFont(size=13, weight="bold"),
-                     text_color=FG, width=120, anchor="w").pack(side="left")
-        lbl_url = ctk.CTkLabel(row_repo, text="github.com/Threadripper2/anima",
-                               font=ctk.CTkFont(size=13, underline=True),
-                               text_color=ACCENT, anchor="w", cursor="hand2")
-        lbl_url.pack(side="left")
-        lbl_url.bind("<Button-1>", lambda e: __import__("webbrowser").open("https://github.com/Threadripper2/anima"))
-
-        # Separatore
-        sep2 = ctk.CTkFrame(self, height=2, corner_radius=0, fg_color=BTN_BG)
-        sep2.pack(fill="x", padx=40, pady=(16, 20))
-        sep2.pack_propagate(False)
-
-        # Chiudi
-        ctk.CTkButton(self, text="Chiudi", width=120,
-                      fg_color=BTN_BG, hover_color=BTN_HO,
-                      font=ctk.CTkFont(size=13),
-                      command=self.destroy).pack(pady=(0, 36))
-
-
-# ============================================================
 # SCREEN 0 FRAME — primo avvio inline (Frame, non Toplevel)
 # ============================================================
 
@@ -3525,8 +3439,8 @@ class MainMenuFrame(tk.Frame):
         m_help = tk.Menu(menubar, tearoff=0, bg=BG2, fg=FG,
                          activebackground=ACCENT, activeforeground=BG)
         m_help.add_command(label="Info generali",
-                           command=lambda: ScreenInfoGenerali(self.app))
-        menubar.add_cascade(label="Info", menu=m_help)
+                           command=cs("Info generali"))
+        menubar.add_cascade(label="Help", menu=m_help)
 
         self.app.config(menu=menubar)
 
@@ -3588,7 +3502,7 @@ class MainMenuFrame(tk.Frame):
 
         self._popola_sidebar()
 
-    def _popola_sidebar(self):
+    def _popola_sidebar(self, nome_nuovo=None):
         for w in self._scroll.winfo_children():
             w.destroy()
         self._sidebar_items.clear()
@@ -3610,9 +3524,14 @@ class MainMenuFrame(tk.Frame):
             bg_col, fg_col = _INIT_COLORS[i % len(_INIT_COLORS)]
             self._aggiungi_sidebar_item(nome, bg_col, fg_col)
 
-        first = self._chars[0].replace(".png", "")
-        bg0, fg0 = _INIT_COLORS[0]
-        self._seleziona(first, bg0, fg0)
+        nomi = [f.replace(".png", "") for f in self._chars]
+        if nome_nuovo and nome_nuovo in nomi:
+            idx = nomi.index(nome_nuovo)
+        else:
+            idx = 0
+        target = nomi[idx]
+        bg_t, fg_t = _INIT_COLORS[idx % len(_INIT_COLORS)]
+        self._seleziona(target, bg_t, fg_t)
 
     def _aggiungi_sidebar_item(self, nome, bg_col, fg_col):
         outer = tk.Frame(self._scroll, bg=BG2, cursor="hand2")
@@ -3836,9 +3755,9 @@ class MainMenuFrame(tk.Frame):
     def _nuovo_da_dashboard(self):
         self._chiedi_conferma("Nuovo personaggio", self._nuovo)
 
-    def _aggiorna_dashboard(self):
+    def _aggiorna_dashboard(self, nome_nuovo=None):
         self._selected_char = None
-        self._popola_sidebar()
+        self._popola_sidebar(nome_nuovo)
 
     # ----------------------------------------------------------
     # Helpers
@@ -4065,7 +3984,6 @@ class MainMenuFrame(tk.Frame):
             "image_path":          os.path.join(user_folder, "characters", f"{nome}.png"),
             "_umori_iniziali":     umori,
             "_variabili_iniziali": variabili,
-            "_extensions_world":   char_data.get("extensions_world", ""),
         }, WIZARD_STEPS_MODIFICA, self._installa)
 
     def _installa(self, character_data):
@@ -4073,7 +3991,7 @@ class MainMenuFrame(tk.Frame):
         try:
             risultato = install_character(sf, character_data)
             ScreenComplete(self, character_data["nome"], risultato,
-                           lambda: self._aggiorna_dashboard())
+                           lambda: self._aggiorna_dashboard(character_data["nome"]))
         except Exception as ex:
             messagebox.showerror(APP_TITLE, f"Errore durante l'installazione:\n{ex}")
 
