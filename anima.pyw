@@ -8,6 +8,7 @@ import tkinter as tk
 from tkinter import filedialog, scrolledtext, messagebox, ttk
 import json
 import os
+import sys
 import base64
 import ctypes
 try:
@@ -393,6 +394,13 @@ def _read_character_data(st_folder, nome):
                             "mes_example":        db.get("mes_example")        or card.get("mes_example",        ""),
                             "alternate_greetings": db.get("alternate_greetings") or card.get("alternate_greetings", []),
                         }
+                        # Character's Note (depth_prompt) — extensions.depth_prompt
+                        ext_dp = (db.get("extensions") or {}).get("depth_prompt") or {}
+                        result["char_note_prompt"] = ext_dp.get("prompt", "") or ""
+                        try:
+                            result["char_note_depth"] = int(ext_dp.get("depth", 4))
+                        except Exception:
+                            result["char_note_depth"] = 4
                         raw_date = card.get("create_date", "")
                         if raw_date:
                             try:
@@ -539,6 +547,15 @@ def generate_character_json(character_data):
     system_prompt    = character_data.get("system_prompt", "")
     mes_example      = character_data.get("mes_example", "")
     alternate_greetings = character_data.get("alternate_greetings", [])
+    char_note_prompt = character_data.get("char_note_prompt", "") or ""
+    try:
+        char_note_depth = int(character_data.get("char_note_depth", 4))
+    except Exception:
+        char_note_depth = 4
+    if char_note_depth < 1:
+        char_note_depth = 1
+    if char_note_depth > 10:
+        char_note_depth = 10
 
     post_history = (f"Ricorda: sei {nome}. Rispondi sempre in italiano, "
                     "in modo naturale e coerente. Non rompere il personaggio. "
@@ -577,7 +594,7 @@ def generate_character_json(character_data):
                 "talkativeness": "0.5",
                 "fav": False,
                 "world": "",
-                "depth_prompt": {"prompt": "", "depth": 4, "role": "system"}
+                "depth_prompt": {"prompt": char_note_prompt, "depth": char_note_depth, "role": "system"}
             }
         },
         "create_date": now
@@ -636,18 +653,23 @@ def _write_character_png(path, card_dict, source_image_path=None):
             chunk_len = struct.unpack(">I", raw[pos:pos+4])[0]
             end_ihdr  = pos + 4 + 4 + chunk_len + 4
             # Ricostruisce: sig + IHDR + nostro tEXt + resto
-            # Rimuove eventuali chunk tEXt chara già presenti nel sorgente
+            # Rimuove eventuali chunk testuali con keyword 'chara' o 'ccv3'
+            # gia' presenti (sia tEXt che iTXt che zTXt).
             tail    = raw[end_ihdr:]
             cleaned = b""
             p       = 0
+            keywords_obsolete = (b"chara", b"ccv3")
             while p + 12 <= len(tail):
                 c_len   = struct.unpack(">I", tail[p:p + 4])[0]
                 c_type  = tail[p + 4:p + 8]
                 c_data  = tail[p + 8:p + 8 + c_len]
                 c_total = 4 + 4 + c_len + 4
-                if c_type == b"tEXt" and c_data.startswith(b"chara\x00"):
-                    pass  # salta il vecchio chunk
-                else:
+                salta = False
+                if c_type in (b"tEXt", b"iTXt", b"zTXt"):
+                    null_idx = c_data.find(b"\x00")
+                    if null_idx > 0 and c_data[:null_idx] in keywords_obsolete:
+                        salta = True
+                if not salta:
                     cleaned += tail[p:p + c_total]
                 p += c_total
             with open(path, "wb") as f:
@@ -718,6 +740,10 @@ def install_character(st_folder, character_data):
         import shutil
         shutil.copy2(img_src, os.path.join(thumb_dir, f"{nome}.png"))
 
+    # Invalida la cache di ST per questo personaggio (sposta in backup
+    # le voci di _cache/characters che si riferiscono al PNG appena scritto).
+    _invalida_cache_st(st_folder, nome)
+
     return {
         "authornote": path_an,
         "quickreply": path_qr,
@@ -725,6 +751,61 @@ def install_character(st_folder, character_data):
         "testo_an": testo_an,
         "nome": nome
     }
+
+
+def _invalida_cache_st(st_folder, nome):
+    """Sposta in backup le voci di _cache/characters relative al personaggio.
+
+    SillyTavern mantiene una cache JSON dei character cards in
+    data/_cache/characters/<hash>. Le voci hanno una `key` che contiene il
+    path del PNG sorgente. Quando anima riscrive un PNG, ST non si accorge
+    automaticamente che e' cambiato e continua a usare la cache vecchia.
+
+    Questa funzione scansiona la cartella di cache e sposta in
+    _cache/_anima_invalidated_<timestamp>/ tutti i file la cui chiave
+    contiene il nome del personaggio modificato. Cosi' ST e' costretto a
+    ri-leggere il PNG aggiornato. La cache di tutti gli altri personaggi
+    resta intatta. I file spostati sono recuperabili dalla cartella di
+    backup in caso di problemi.
+    """
+    import datetime
+    cache_dir = os.path.join(st_folder, "data", "_cache", "characters")
+    if not os.path.isdir(cache_dir):
+        return
+    needle = (os.sep + "characters" + os.sep + nome + ".png").lower()
+    needle_alt = ("/characters/" + nome + ".png").lower()
+    da_spostare = []
+    try:
+        for f in os.listdir(cache_dir):
+            full = os.path.join(cache_dir, f)
+            if not os.path.isfile(full):
+                continue
+            try:
+                with open(full, "rb") as fp:
+                    raw = fp.read(4096)  # solo l'inizio: la key sta a inizio file
+                txt = raw.decode("utf-8", errors="ignore").lower()
+                if needle in txt or needle_alt in txt:
+                    da_spostare.append(f)
+            except Exception:
+                continue
+    except Exception:
+        return
+    if not da_spostare:
+        return
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_dir = os.path.join(st_folder, "data", "_cache",
+                               f"_anima_invalidated_{timestamp}")
+    try:
+        os.makedirs(backup_dir, exist_ok=True)
+        import shutil
+        for f in da_spostare:
+            try:
+                shutil.move(os.path.join(cache_dir, f),
+                            os.path.join(backup_dir, f))
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 # ============================================================
 # LOREBOOK MANAGER
@@ -1852,6 +1933,122 @@ class Screen2d(ctk.CTkToplevel):
         cb()
 
 # ============================================================
+# SCREEN 2d-note — Character's Note (extensions.depth_prompt)
+# ============================================================
+
+class Screen2d_note(ctk.CTkToplevel):
+    def __init__(self, parent, genere, nome, callback_avanti, callback_annulla,
+                 prompt_iniziale="", depth_iniziale=4):
+        super().__init__(parent)
+        self.withdraw()
+        self.title(APP_TITLE)
+        self.resizable(True, False)
+        _center_toplevel(self, 700, 600)
+        self.genere           = genere
+        self.nome             = nome
+        self.callback_avanti  = callback_avanti
+        self.callback_annulla = callback_annulla
+        self._depth_value     = max(1, min(10, int(depth_iniziale or 4)))
+        self._build()
+        if prompt_iniziale:
+            self.txt.insert("1.0", prompt_iniziale)
+        self._aggiorna_label_depth()
+        self.deiconify()
+        self.grab_set()
+        self.lift()
+        self.txt.focus_set()
+
+    def _build(self):
+        ctk.CTkLabel(self, text=f"Nota del personaggio per {self.nome}",
+                     font=ctk.CTkFont(size=17, weight="bold"),
+                     text_color=ACCENT).pack(pady=(24, 4))
+        ctk.CTkLabel(
+            self,
+            text="Istruzione iniettata in chat a una profondit\xe0 fissa "
+                 "(equivalente a Character's Note di SillyTavern).\n"
+                 "Lascia vuoto se non serve. Skippabile.",
+            font=ctk.CTkFont(size=12), text_color=GRAY,
+            justify="center"
+        ).pack(pady=(0, 16))
+
+        ctk.CTkLabel(self, text="Testo della nota",
+                     font=ctk.CTkFont(size=12, weight="bold"),
+                     text_color=FG).pack(anchor="w", padx=36)
+
+        self.txt = ctk.CTkTextbox(self, font=ctk.CTkFont(size=12),
+                                   fg_color=BG2, text_color=FG,
+                                   border_color=BTN_BG, corner_radius=8,
+                                   wrap="word", height=180)
+        self.txt.pack(padx=36, fill="x", pady=(4, 12))
+
+        # Riga depth
+        depth_row = ctk.CTkFrame(self, fg_color="transparent")
+        depth_row.pack(padx=36, fill="x", pady=(4, 0))
+        ctk.CTkLabel(depth_row, text="Profondit\xe0 di iniezione",
+                     font=ctk.CTkFont(size=12, weight="bold"),
+                     text_color=FG).pack(side="left")
+        self.lbl_depth_val = ctk.CTkLabel(
+            depth_row, text=str(self._depth_value),
+            font=ctk.CTkFont(size=12, weight="bold"), text_color=ACCENT,
+            width=28
+        )
+        self.lbl_depth_val.pack(side="right")
+        ctk.CTkLabel(depth_row,
+                     text="(quanti messaggi dal fondo: 1 = subito, 10 = molto in alto)",
+                     font=ctk.CTkFont(size=11), text_color=GRAY
+                     ).pack(side="right", padx=(0, 10))
+
+        self.slider_depth = ctk.CTkSlider(
+            self, from_=1, to=10, number_of_steps=9,
+            command=self._on_slider
+        )
+        self.slider_depth.set(self._depth_value)
+        self.slider_depth.pack(padx=36, fill="x", pady=(6, 0))
+
+        self.lbl_ok = ctk.CTkLabel(self, text="",
+                                    font=ctk.CTkFont(size=12), text_color=GREEN)
+        self.lbl_ok.pack(pady=(10, 0))
+
+        btn_row = ctk.CTkFrame(self, fg_color="transparent")
+        btn_row.pack(pady=(12, 0))
+        ctk.CTkButton(btn_row, text="Annulla", font=ctk.CTkFont(size=12),
+                      fg_color=BTN_BG, text_color=GRAY, hover_color=BTN_HO,
+                      corner_radius=8, command=self._annulla
+                      ).pack(side="left", padx=(0, 12))
+        ctk.CTkButton(btn_row, text="Salta \u2192", font=ctk.CTkFont(size=12),
+                      fg_color=BTN_BG, text_color=FG, hover_color=BTN_HO,
+                      corner_radius=8, command=self._salta
+                      ).pack(side="left", padx=(0, 12))
+        ctk.CTkButton(btn_row, text="Continua \u2192",
+                      font=ctk.CTkFont(size=13, weight="bold"),
+                      fg_color=ACCENT, text_color=BG, hover_color="#b4befe",
+                      corner_radius=8, command=self._avanti).pack(side="left")
+
+    def _on_slider(self, val):
+        self._depth_value = int(round(val))
+        self._aggiorna_label_depth()
+
+    def _aggiorna_label_depth(self):
+        try:
+            self.lbl_depth_val.configure(text=str(self._depth_value))
+        except Exception:
+            pass
+
+    def _avanti(self):
+        prompt = self.txt.get("1.0", "end-1c").strip()
+        self.destroy()
+        self.callback_avanti(prompt, self._depth_value)
+
+    def _salta(self):
+        self.destroy()
+        self.callback_avanti("", self._depth_value)
+
+    def _annulla(self):
+        cb = self.callback_annulla
+        self.destroy()
+        cb()
+
+# ============================================================
 # SCREEN 2e — Esempi di dialogo (mes_example)
 # ============================================================
 
@@ -2325,7 +2522,7 @@ class ScreenComplete(ctk.CTkToplevel):
         self.withdraw()
         self.title(APP_TITLE)
         self.resizable(False, False)
-        _center_toplevel(self, 680, 530)
+        _center_toplevel(self, 680, 720)
         self.callback_chiudi = callback_chiudi
         self._build(nome, risultato)
         self.deiconify()
@@ -3270,6 +3467,13 @@ WIZARD_STEPS_NUOVO = [
         lambda sp: r.next({"system_prompt": sp}),
         r.prev,
         testo_iniziale=r.data.get("system_prompt", "")),
+    lambda r: Screen2d_note(
+        r.parent, r.data["genere"], r.data.get("nome", ""),
+        lambda prompt, depth: r.next({"char_note_prompt": prompt,
+                                       "char_note_depth": depth}),
+        r.prev,
+        prompt_iniziale=r.data.get("char_note_prompt", ""),
+        depth_iniziale=r.data.get("char_note_depth", 4)),
     lambda r: Screen2e(
         r.parent, r.data["genere"], r.data.get("nome", ""),
         lambda me: r.next({"mes_example": me}),
@@ -3981,6 +4185,8 @@ class MainMenuFrame(tk.Frame):
             "system_prompt":       char_data.get("system_prompt",       ""),
             "mes_example":         char_data.get("mes_example",         ""),
             "alternate_greetings": char_data.get("alternate_greetings", []),
+            "char_note_prompt":    char_data.get("char_note_prompt", ""),
+            "char_note_depth":     char_data.get("char_note_depth", 4),
             "image_path":          os.path.join(user_folder, "characters", f"{nome}.png"),
             "_umori_iniziali":     umori,
             "_variabili_iniziali": variabili,
@@ -4041,9 +4247,68 @@ class App(tk.Tk):
 
 
 # ============================================================
+# SINGLE-INSTANCE LOCK
+# ============================================================
+
+def _acquire_single_instance_lock():
+    """Impedisce l'apertura di piu' istanze contemporanee di Anima.
+
+    Crea un file di lock in %TEMP%/anima_st_manager.lock e lo tiene aperto
+    in modalita' esclusiva per tutta la durata del processo. Se un'altra
+    istanza ha gia' il lock, mostra un messaggio e termina.
+
+    Ritorna l'handle del file da tenere aperto (non chiuderlo).
+    """
+    import tempfile
+    lock_path = os.path.join(tempfile.gettempdir(), "anima_st_manager.lock")
+    try:
+        # Su Windows usiamo msvcrt.locking; su altre piattaforme fcntl.
+        if os.name == "nt":
+            import msvcrt
+            fh = open(lock_path, "a+b")
+            try:
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                return fh
+            except OSError:
+                fh.close()
+                return None
+        else:
+            import fcntl
+            fh = open(lock_path, "a+b")
+            try:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return fh
+            except OSError:
+                fh.close()
+                return None
+    except Exception:
+        # In caso di errori imprevisti non bloccare l'avvio
+        return True
+
+
+# ============================================================
 # ENTRY POINT
 # ============================================================
 
 if __name__ == "__main__":
+    _lock_handle = _acquire_single_instance_lock()
+    if _lock_handle is None:
+        # Un'altra istanza e' gia' aperta
+        try:
+            _root_warn = tk.Tk()
+            _root_warn.withdraw()
+            messagebox.showwarning(
+                APP_TITLE,
+                "ANIMA \xe8 gi\xe0 aperta in un'altra finestra.\n\n"
+                "Aprire pi\xf9 istanze contemporaneamente pu\xf2 causare la "
+                "perdita di modifiche ai personaggi (le istanze si "
+                "sovrascrivono a vicenda).\n\n"
+                "Chiudi prima l'altra finestra e riprova."
+            )
+            _root_warn.destroy()
+        except Exception:
+            pass
+        sys.exit(0)
+
     app = App()
     app.mainloop()
